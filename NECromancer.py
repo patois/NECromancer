@@ -302,7 +302,6 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
             color = COLOR_INSN
             if DEBUG_PLUGIN:
                 color = COLOR_MACRO
-                print "debug is true"
             outctx.out_tagon(color)
             outctx.out_line(mnem)
             outctx.out_tagoff(color)
