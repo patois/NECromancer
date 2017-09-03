@@ -15,7 +15,7 @@ from struct import unpack
 #
 # This plugin extends the V850E1 IDA processor module by adding support
 # for certain V850E2 instructions on a per need basis. Rather than modifying
-# the source code of the V85ßE1 IDA processor module, this script has been
+# the source code of the V850E1 IDA processor module, this script has been
 # developed as an exercise in writing a processor module extension in
 # IDAPython, particularly for version 7 of IDA and onwards.
 #
@@ -36,8 +36,9 @@ from struct import unpack
 # 2017.02.02 - support for ST.H (reg3, disp23[reg1]) instruction,
 #              bugfixes, cleanup
 # 2017.02.03 - support for sign extending 23bit displacement values,
-#              "sch1l", "schir", "caxi" and "fetrap" instructions
+#              "sch1l", "sch1r", "caxi" and "fetrap" instructions
 # 2017.08.20 - IDA 7 compatibility
+# 2017.09.03 - Full IDA 7 compatibility (not requiring compatibility layer)
 #
 #
 # based on V850E2S User's Manual: Architecture, available at:
@@ -47,8 +48,9 @@ from struct import unpack
 
 __author__ = "Dennis Elser"
 
-DEBUG = True
+DEBUG_PLUGIN = True
 
+# from V850 processor module
 N850F_USEBRACKETS = 0x01
 N850F_OUTSIGNED = 0x02
 
@@ -66,7 +68,7 @@ class NewInstructions:
     NN_sch1l,
     NN_sch1r,
     NN_caxi,
-    NN_fetrap) = range(idaapi.CUSTOM_CMD_ITYPE, idaapi.CUSTOM_CMD_ITYPE+13)
+    NN_fetrap) = range(idaapi.CUSTOM_INSN_ITYPE, idaapi.CUSTOM_INSN_ITYPE+13)
     
     lst = {NN_divq:"divq",
            NN_divqu:"divqu",
@@ -87,6 +89,7 @@ class NewInstructions:
 class v850_idp_hook_t(idaapi.IDP_Hooks):
     def __init__(self):
         idaapi.IDP_Hooks.__init__(self)
+        self.bookmark_slot = 0
 
     def parse_r1(self, w):
         return w & 0x1F
@@ -104,7 +107,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
         return val
 
     def decode_instruction(self, insn):
-        buf = idaapi.get_many_bytes(insn.ea, 2)
+        buf = idaapi.get_bytes(insn.ea, 2)
         hw1 = unpack("<H", buf)[0]
 
         op = (hw1 & 0x7E0) >> 5 # take bit5->bit10
@@ -118,7 +121,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
 
         # Format XIV
         elif op == 0x3D and ((hw1 & 0xFFE0) >> 5) == 0x3D:
-            buf = idaapi.get_many_bytes(insn.ea+2, 2)
+            buf = idaapi.get_bytes(insn.ea+2, 2)
             hw2 = unpack("<H", buf)[0]
             subop = hw2 & 0x1F
             
@@ -132,7 +135,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
                 insn.Op1.specflag1 = N850F_USEBRACKETS | N850F_OUTSIGNED
                 insn.Op1.reg = self.parse_r1(hw1)
 
-                buf = idaapi.get_many_bytes(insn.ea+4, 2)
+                buf = idaapi.get_bytes(insn.ea+4, 2)
                 hw3 = unpack("<H", buf)[0]
                 
                 insn.Op1.addr = self.sign_extend(((hw3 << 6) | ((hw2 & 0x7E0) >> 5)) << 1, 23)
@@ -152,7 +155,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
                 insn.Op2.specflag1 = N850F_USEBRACKETS | N850F_OUTSIGNED
                 insn.Op2.reg = self.parse_r1(hw1)
 
-                buf = idaapi.get_many_bytes(insn.ea+4, 2)
+                buf = idaapi.get_bytes(insn.ea+4, 2)
                 hw3 = unpack("<H", buf)[0]
                 
                 insn.Op2.addr = self.sign_extend(((hw3 << 6) | ((hw2 & 0x7E0) >> 5)) << 1, 23)
@@ -179,7 +182,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
 
         # Format IX, X, XI
         elif op == 0x3F:
-            buf = idaapi.get_many_bytes(insn.ea+2, 2)
+            buf = idaapi.get_bytes(insn.ea+2, 2)
             hw2 = unpack("<H", buf)[0]
             subop = hw2 & 0x7FF
 
@@ -294,11 +297,12 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
 
     def ev_out_mnem(self, outctx):
         insntype = outctx.insn.itype
-        if (insntype >= idaapi.CUSTOM_CMD_ITYPE) and (insntype in NewInstructions.lst):
+        if (insntype >= idaapi.CUSTOM_INSN_ITYPE) and (insntype in NewInstructions.lst):
             mnem = NewInstructions.lst[insntype]
             color = COLOR_INSN
-            if DEBUG:
+            if DEBUG_PLUGIN:
                 color = COLOR_MACRO
+                print "debug is true"
             outctx.out_tagon(color)
             outctx.out_line(mnem)
             outctx.out_tagoff(color)
@@ -349,12 +353,11 @@ class NECromancer_t(idaapi.plugin_t):
 
         self.prochook = v850_idp_hook_t()
         self.prochook.hook()
-        print "necromancer"
+        print "%s intialized." % NECromancer_t.wanted_name
         return idaapi.PLUGIN_KEEP
 
     def run(self, arg):
         pass
-
 
     def term(self):
         if self.prochook:
