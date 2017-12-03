@@ -1,4 +1,8 @@
-import idaapi
+from ida_lines import COLOR_INSN, COLOR_MACRO 
+from ida_idp import CUSTOM_INSN_ITYPE, IDP_Hooks, ph_get_regnames, ph_get_id, PLFM_NEC_V850X
+from ida_bytes import get_bytes
+from ida_idaapi import plugin_t, PLUGIN_PROC, PLUGIN_HIDE, PLUGIN_SKIP, PLUGIN_KEEP
+from ida_ua import o_displ, o_reg, dt_dword, OOF_ADDR
 from struct import unpack
 
 ###############################################################################
@@ -39,6 +43,7 @@ from struct import unpack
 #              "sch1l", "sch1r", "caxi" and "fetrap" instructions
 # 2017.08.20 - IDA 7 compatibility
 # 2017.09.03 - Full IDA 7 compatibility (not requiring compatibility layer)
+# 2017.12.03 - Bugfixes (with thanks to https://github.com/Quorth)
 #
 #
 # based on V850E2S User's Manual: Architecture, available at:
@@ -49,6 +54,8 @@ from struct import unpack
 __author__ = "Dennis Elser"
 
 DEBUG_PLUGIN = True
+
+NEWINSN_COLOR = COLOR_MACRO if DEBUG_PLUGIN else COLOR_INSN
 
 # from V850 processor module
 N850F_USEBRACKETS = 0x01
@@ -68,7 +75,7 @@ class NewInstructions:
     NN_sch1l,
     NN_sch1r,
     NN_caxi,
-    NN_fetrap) = range(idaapi.CUSTOM_INSN_ITYPE, idaapi.CUSTOM_INSN_ITYPE+13)
+    NN_fetrap) = range(CUSTOM_INSN_ITYPE, CUSTOM_INSN_ITYPE+13)
     
     lst = {NN_divq:"divq",
            NN_divqu:"divqu",
@@ -86,10 +93,9 @@ class NewInstructions:
 
 
 #--------------------------------------------------------------------------
-class v850_idp_hook_t(idaapi.IDP_Hooks):
+class v850_idp_hook_t(IDP_Hooks):
     def __init__(self):
-        idaapi.IDP_Hooks.__init__(self)
-        self.bookmark_slot = 0
+        IDP_Hooks.__init__(self)
 
     def parse_r1(self, w):
         return w & 0x1F
@@ -107,7 +113,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
         return val
 
     def decode_instruction(self, insn):
-        buf = idaapi.get_bytes(insn.ea, 2)
+        buf = get_bytes(insn.ea, 2)
         hw1 = unpack("<H", buf)[0]
 
         op = (hw1 & 0x7E0) >> 5 # take bit5->bit10
@@ -121,7 +127,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
 
         # Format XIV
         elif op == 0x3D and ((hw1 & 0xFFE0) >> 5) == 0x3D:
-            buf = idaapi.get_bytes(insn.ea+2, 2)
+            buf = get_bytes(insn.ea+2, 2)
             hw2 = unpack("<H", buf)[0]
             subop = hw2 & 0x1F
             
@@ -135,7 +141,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
                 insn.Op1.specflag1 = N850F_USEBRACKETS | N850F_OUTSIGNED
                 insn.Op1.reg = self.parse_r1(hw1)
 
-                buf = idaapi.get_bytes(insn.ea+4, 2)
+                buf = get_bytes(insn.ea+4, 2)
                 hw3 = unpack("<H", buf)[0]
                 
                 insn.Op1.addr = self.sign_extend(((hw3 << 6) | ((hw2 & 0x7E0) >> 5)) << 1, 23)
@@ -155,7 +161,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
                 insn.Op2.specflag1 = N850F_USEBRACKETS | N850F_OUTSIGNED
                 insn.Op2.reg = self.parse_r1(hw1)
 
-                buf = idaapi.get_bytes(insn.ea+4, 2)
+                buf = get_bytes(insn.ea+4, 2)
                 hw3 = unpack("<H", buf)[0]
                 
                 insn.Op2.addr = self.sign_extend(((hw3 << 6) | ((hw2 & 0x7E0) >> 5)) << 1, 23)
@@ -182,7 +188,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
 
         # Format IX, X, XI
         elif op == 0x3F:
-            buf = idaapi.get_bytes(insn.ea+2, 2)
+            buf = get_bytes(insn.ea+2, 2)
             hw2 = unpack("<H", buf)[0]
             subop = hw2 & 0x7FF
 
@@ -297,14 +303,13 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
 
     def ev_out_mnem(self, outctx):
         insntype = outctx.insn.itype
-        if (insntype >= idaapi.CUSTOM_INSN_ITYPE) and (insntype in NewInstructions.lst):
+        global NEWINSN_COLOR
+
+        if (insntype >= CUSTOM_INSN_ITYPE) and (insntype in NewInstructions.lst):
             mnem = NewInstructions.lst[insntype]
-            color = COLOR_INSN
-            if DEBUG_PLUGIN:
-                color = COLOR_MACRO
-            outctx.out_tagon(color)
+            outctx.out_tagon(NEWINSN_COLOR)
             outctx.out_line(mnem)
-            outctx.out_tagoff(color)
+            outctx.out_tagoff(NEWINSN_COLOR)
 
             # TODO: how can MNEM_width be determined programatically?
             MNEM_WIDTH = 8
@@ -328,7 +333,7 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
                 brackets = insn.ops[op.n].specflag1 & N850F_USEBRACKETS
                 if brackets:
                     outctx.out_symbol('[')
-                outctx.out_register(idaapi.ph.regnames[op.reg])
+                outctx.out_register(ph_get_regnames()[op.reg])
                 if brackets:
                     outctx.out_symbol(']')
                 return True
@@ -336,8 +341,8 @@ class v850_idp_hook_t(idaapi.IDP_Hooks):
 
 
 #--------------------------------------------------------------------------
-class NECromancer_t(idaapi.plugin_t):
-    flags = idaapi.PLUGIN_PROC | idaapi.PLUGIN_HIDE
+class NECromancer_t(plugin_t):
+    flags = PLUGIN_PROC | PLUGIN_HIDE
     comment = ""
     wanted_hotkey = ""
     help = "Adds support for additional V850X instructions"
@@ -347,13 +352,13 @@ class NECromancer_t(idaapi.plugin_t):
         self.prochook = None
 
     def init(self):
-        if idaapi.ph_get_id() != idaapi.PLFM_NEC_V850X:
-            return idaapi.PLUGIN_SKIP
+        if ph_get_id() != PLFM_NEC_V850X:
+            return PLUGIN_SKIP
 
         self.prochook = v850_idp_hook_t()
         self.prochook.hook()
         print "%s intialized." % NECromancer_t.wanted_name
-        return idaapi.PLUGIN_KEEP
+        return PLUGIN_KEEP
 
     def run(self, arg):
         pass
