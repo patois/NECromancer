@@ -2,7 +2,7 @@ from ida_lines import COLOR_INSN, COLOR_MACRO
 from ida_idp import CUSTOM_INSN_ITYPE, IDP_Hooks, ph_get_regnames, ph_get_id, PLFM_NEC_V850X
 from ida_bytes import get_bytes
 from ida_idaapi import plugin_t, PLUGIN_PROC, PLUGIN_HIDE, PLUGIN_SKIP, PLUGIN_KEEP
-from ida_ua import o_displ, o_reg, dt_dword, OOF_ADDR
+from ida_ua import o_displ, o_reg, o_imm, dt_dword, OOF_ADDR
 from struct import unpack
 
 ###############################################################################
