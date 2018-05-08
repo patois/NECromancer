@@ -44,6 +44,7 @@ from struct import unpack
 # 2017.08.20 - IDA 7 compatibility
 # 2017.09.03 - Full IDA 7 compatibility (not requiring compatibility layer)
 # 2017.12.03 - Bugfixes (with thanks to https://github.com/Quorth)
+# 2018.05.08 - Fixed decoding of fetrap instruction
 #
 #
 # based on V850E2S User's Manual: Architecture, available at:
@@ -119,7 +120,7 @@ class v850_idp_hook_t(IDP_Hooks):
         op = (hw1 & 0x7E0) >> 5 # take bit5->bit10
 
         # Format I
-        if op == 2:
+        if op == 2 and (hw1 >> 11) == 0 and (hw1 & 0x1F) != 0:
             # TODO add vector4 parsing
             insn.itype = NewInstructions.NN_fetrap
             insn.size = 2
@@ -369,4 +370,4 @@ class NECromancer_t(plugin_t):
 
 #--------------------------------------------------------------------------
 def PLUGIN_ENTRY():
-    return NECromancer_t()
+    return NECromancer_t() 
